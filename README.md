@@ -22,6 +22,7 @@ change (see [Swapping in the real model](#swapping-in-the-real-model)).
 | `infiltration_engine.py` | Core module: rollout, risk scoring, stage mapping, main pipeline |
 | `tune_thresholds.py` | Grid-searches rule thresholds / blend weight against labelled scenarios |
 | `horizon_experiment.py` | Finds the optimal forecast horizon K and drafts the architecture-doc paragraph |
+| `data_pipeline.py` | Ingests classic PCAP or JSONL network logs and produces the normalised 19-feature vectors/windows required by the model |
 
 ## Quick start
 
@@ -69,6 +70,30 @@ Current Network State Window [S_(t-W) ... S_t]
 ## Feature schema
 
 19 normalised features (roughly `[0, 1]`, higher = more suspicious), defined in `FEATURE_NAMES` — flag counts, byte/packet volumes, flow duration, inter-arrival-time stats, port-scan signals, and C2/lateral-movement indicators. See the top of `infiltration_engine.py` for the full list. **This is the contract Data & Feature Engineering's output must match.**
+
+## Data ingestion pipeline
+
+`data_pipeline.py` supplies the missing upstream data layer. It reads either:
+
+- classic Ethernet/IPv4 `.pcap` captures (TCP and UDP metadata), or
+- JSON Lines packet/flow events from firewall, Suricata, or Zeek-style logs.
+
+It canonicalises each input into a packet record, groups records into fixed
+source-IP observation windows (60 seconds by default), calculates the 19 raw
+features, applies a bounded min-max normalisation, and writes JSON Lines. Use
+`--sequence-size T` to produce `model_window` arrays shaped `(T, 19)` for the
+windowed world-model contract.
+
+```bash
+python data_pipeline.py pcap traffic.pcap --output feature_rows.jsonl
+python data_pipeline.py jsonl network_events.jsonl --window-seconds 60 --sequence-size 10 --output model_windows.jsonl
+python -m unittest test_data_pipeline.py
+```
+
+The supplied normalisation scales are safe starting caps, not learned values.
+Before deployment, profile benign traffic and tune the scales (or replace the
+bounded transform with a persisted training-set scaler) so training and
+inference use exactly the same transform.
 
 ## Usage
 
